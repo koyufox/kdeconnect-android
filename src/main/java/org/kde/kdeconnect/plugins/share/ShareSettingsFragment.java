@@ -101,7 +101,7 @@ public class ShareSettingsFragment extends PluginSettingsFragment {
 
     public static boolean isSendFolderEnabled(Context context) {
         return PreferenceManager.getDefaultSharedPreferences(context)
-                .getBoolean(PREFERENCE_SEND_FOLDER, false);
+                .getBoolean(PREFERENCE_SEND_FOLDER, true);
     }
 
     public static boolean isCustomDestinationEnabled(Context context) {
