@@ -54,6 +54,32 @@ object FilesHelper {
         return validFilename
     }
 
+    /**
+     * Returns a directory name that does not conflict with any existing
+     * directory in [folder].  When the requested [dirName] is already taken,
+     * appends a " (1)", " (2)" … suffix following the same convention as
+     * [findValidNonExistingFileName].
+     */
+    @JvmStatic
+    fun findValidNonExistingDirectoryName(folder: DocumentFile, dirName: String): String {
+        var dirName = dirName.trimEnd('.')
+        if (dirName.isEmpty()) {
+            dirName = "new_folder"
+        }
+        val existingNames = folder.listFiles()
+            .filter { it.isDirectory }
+            .mapNotNull { it.name }
+            .toHashSet()
+        var validName: String
+        var num = 0
+        do {
+            val suffix = if (num == 0) "" else " ($num)"
+            validName = buildValidFatFilename("$dirName$suffix")
+            num++
+        } while (validName in existingNames)
+        return validName
+    }
+
     /*
         Source https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/os/FileUtils.java
      */

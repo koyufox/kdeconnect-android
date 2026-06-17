@@ -81,6 +81,12 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     private JSONArray directoryPaths;
     private boolean directoriesEnsured;
 
+    // Folder transfer: resolved root folder display name.  May differ from the
+    // name sent by the peer when a folder with the same name already exists at
+    // the destination — in that case a " (1)", " (2)" … suffix is appended.
+    @Nullable
+    private String rootFolderName;
+
     CompositeReceiveFileJob(Device device, BackgroundJob.Callback<Void> callBack) {
         super(device, callBack);
 
@@ -302,6 +308,11 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
         DocumentFile targetFolder = destinationFolderDocument;
         if (relativePath != null && !relativePath.isEmpty()) {
             String[] segments = relativePath.split("/");
+            // If the root folder was renamed to avoid a name conflict, use the
+            // resolved name so files land in the renamed tree.
+            if (rootFolderName != null && segments.length > 0 && !segments[0].isEmpty()) {
+                segments[0] = rootFolderName;
+            }
             // Walk all segments except the last (which is the filename)
             for (int i = 0; i < segments.length - 1; i++) {
                 if (segments[i].isEmpty()) continue;
@@ -340,6 +351,10 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     /**
      * Create all directories from the {@code directoryPaths} update packet.
      * Called once at the start of {@link #run()} for folder transfers.
+     *
+     * <p>When a folder with the same root name already exists at the
+     * destination, a " (1)", " (2)" … suffix is appended so that the
+     * incoming tree does not silently merge into the pre-existing folder.
      */
     private void ensureDirectoryPathsFromPacket() {
         if (directoryPaths == null || directoryPaths.length() == 0) return;
@@ -353,13 +368,43 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
             root = DocumentFile.fromFile(new File(defaultPath));
         }
 
+        // Resolve a unique root folder name so we never silently merge into
+        // an existing folder with the same name.
+        try {
+            final String originalRoot = directoryPaths.getString(0);
+            if (originalRoot != null && !originalRoot.isEmpty()) {
+                this.rootFolderName = FilesHelper.findValidNonExistingDirectoryName(root, originalRoot);
+            }
+        } catch (org.json.JSONException e) {
+            Log.e("SharePlugin", "Failed to read root folder name", e);
+        }
+
         for (int i = 0; i < directoryPaths.length(); i++) {
             try {
-                ensureDirectoryPathExists(root, directoryPaths.getString(i));
+                String dirPath = directoryPaths.getString(i);
+                if (rootFolderName != null) {
+                    dirPath = replaceRootSegment(dirPath, rootFolderName);
+                }
+                ensureDirectoryPathExists(root, dirPath);
             } catch (org.json.JSONException e) {
                 Log.e("SharePlugin", "Invalid directory path entry", e);
             }
         }
+    }
+
+    /**
+     * Replace the first path segment with {@code newRoot}, leaving the
+     * remainder unchanged.
+     * <p>
+     * {@code "Documents/subdir/deep" → "Documents (1)/subdir/deep"}<br>
+     * {@code "Documents" → "Documents (1)"}
+     */
+    private static String replaceRootSegment(String path, String newRoot) {
+        final int firstSlash = path.indexOf('/');
+        if (firstSlash > 0) {
+            return newRoot + path.substring(firstSlash);
+        }
+        return newRoot;
     }
 
     /**
