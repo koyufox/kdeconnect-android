@@ -331,6 +331,43 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
     <string name="sftp_missing_permission_error">Permissions missing: filesystem access</string>
     <string name="no_players_connected">No players found</string>
     <string name="send_files">Send files</string>
+
+    <!-- Share plugin preference groups -->
+    <string name="share_sending_category">Sending</string>
+    <string name="share_receiving_category">Receiving</string>
+
+    <!-- Send folder toggle -->
+    <string name="share_send_folder_title">Send folder</string>
+    <string name="share_send_folder_summary">Show file/folder chooser before sending to other Android devices</string>
+
+    <!-- Send folder chooser -->
+    <string name="send_file_option">Send file</string>
+    <string name="send_file_option_desc">Select one or more files to send</string>
+    <string name="send_folder_option">Send folder</string>
+    <string name="send_folder_option_desc">Select a folder to send with its entire contents, preserving folder structure</string>
+
+    <!-- Send folder transfer status -->
+    <string name="send_folder_empty">No files found in selected folder</string>
+    <string name="transfer_in_progress">A transfer is already in progress</string>
+    <string name="sending_folder_progress">%1$s/%2$s (%3$d of %4$d)</string>
+    <string name="sending_folder_preparing">Preparing folder for transfer…</string>
+    <string name="sent_folder_partial">Sent folder \"%1$s\": %2$d/%3$d files to %4$s</string>
+
+    <!-- Send folder completion plurals -->
+    <plurals name="sent_folder_title">
+        <item quantity="one">Sent folder \"%1$s\" (%2$d file) to %3$s</item>
+        <item quantity="other">Sent folder \"%1$s\" (%2$d files) to %3$s</item>
+    </plurals>
+
+    <!-- Send folder resume -->
+    <string name="resume_folder_transfer_title">Resume folder transfer to %1$s?</string>
+    <string name="resume_folder_transfer_message">Folder \"%1$s\": %2$d of %3$d files already sent</string>
+    <string name="resume">Resume</string>
+    <string name="dismiss_transfer">Dismiss</string>
+
+    <!-- Send folder warnings -->
+    <string name="folder_transfer_max_files">Folder has more than 5000 files. Only the first 5000 will be sent.</string>
+
     <string name="use_digitizer">Use as drawing tablet</string>
     <string name="digitizer_draw_button">Draw using finger</string>
     <string name="digitizer_preference_key_hide_draw_button" translatable="false">digitizer_hide_draw_button</string>

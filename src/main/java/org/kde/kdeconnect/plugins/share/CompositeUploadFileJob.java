@@ -40,20 +40,20 @@ import java.util.List;
  * @see SendPacketStatusCallback
  */
 public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
-    private boolean isRunning;
+    protected boolean isRunning;
     private final Handler handler;
-    private String currentFileName;
-    private int currentFileNum;
+    protected String currentFileName;
+    protected int currentFileNum;
     private boolean updatePacketPending;
-    private long totalSend;
-    private int prevProgressPercentage;
-    private final UploadNotification uploadNotification;
+    protected long totalSend;
+    protected int prevProgressPercentage;
+    protected final UploadNotification uploadNotification;
 
-    private final Object lock;                              //Use to protect concurrent access to the variables below
+    protected final Object lock;                              //Use to protect concurrent access to the variables below
     @GuardedBy("lock")
-    private final List<NetworkPacket> networkPacketList;
-    private NetworkPacket currentNetworkPacket;
-    private final Device.SendPacketStatusCallback sendPacketStatusCallback;
+    protected final List<NetworkPacket> networkPacketList;
+    protected NetworkPacket currentNetworkPacket;
+    protected final Device.SendPacketStatusCallback sendPacketStatusCallback;
     @GuardedBy("lock")
     private int totalNumFiles;
     @GuardedBy("lock")
@@ -79,7 +79,7 @@ public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
         sendPacketStatusCallback = new SendPacketStatusCallback();
     }
 
-    private Device getDevice() { return getRequestInfo(); }
+    protected Device getDevice() { return getRequestInfo(); }
 
     @Override
     public void run() {
@@ -102,11 +102,9 @@ public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
 
                 setProgress(prevProgressPercentage);
 
-                addTotalsToNetworkPacket(currentNetworkPacket);
-
                 // We set sendPayloadFromSameThread to true so this call blocks until the payload
-                // has been received by the other end,  so payloads are sent one by one.
-                if (!getDevice().sendPacketBlocking(currentNetworkPacket, sendPacketStatusCallback, true)) {
+                // has been received by the other end, so payloads are sent one by one.
+                if (!sendCurrentPacket()) {
                     throw new RuntimeException("Sending packet failed");
                 }
 
@@ -151,7 +149,18 @@ public class CompositeUploadFileJob extends BackgroundJob<Device, Void> {
         }
     }
 
-    private void setProgress(int progress) {
+    /**
+     * Send the current packet. Override in subclasses for folder-specific
+     * metadata or skip-on-failure semantics.
+     *
+     * @return true if the packet was sent successfully, false otherwise
+     */
+    protected boolean sendCurrentPacket() {
+        addTotalsToNetworkPacket(currentNetworkPacket);
+        return getDevice().sendPacketBlocking(currentNetworkPacket, sendPacketStatusCallback, true);
+    }
+
+    protected void setProgress(int progress) {
         synchronized (lock) {
             uploadNotification.setProgress(progress, getDevice().getContext().getResources()
                     .getQuantityString(R.plurals.outgoing_files_text, totalNumFiles, currentFileName, currentFileNum, totalNumFiles));

@@ -14,12 +14,15 @@ import android.os.Build;
 import android.util.Log;
 
 import androidx.annotation.GuardedBy;
+import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.documentfile.provider.DocumentFile;
 
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
+import org.json.JSONArray;
+
 import org.kde.kdeconnect.Device;
 import org.kde.kdeconnect.helpers.FilesHelper;
 import org.kde.kdeconnect.helpers.MediaStoreHelper;
@@ -73,6 +76,11 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
     private long totalPayloadSize;
     private boolean isRunning;
 
+    // Folder transfer: directory paths to pre-create, sent once via update packet
+    @Nullable
+    private JSONArray directoryPaths;
+    private boolean directoriesEnsured;
+
     CompositeReceiveFileJob(Device device, BackgroundJob.Callback<Void> callBack) {
         super(device, callBack);
 
@@ -103,6 +111,15 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
         }
     }
 
+    /**
+     * Receive the complete directory tree paths for a folder transfer.
+     * Called from {@link SharePlugin#onPacketReceived} when the
+     * {@code directoryPaths} field is present in an update packet.
+     */
+    void setDirectoryPaths(@Nullable JSONArray paths) {
+        this.directoryPaths = paths;
+    }
+
     void addNetworkPacket(NetworkPacket networkPacket) {
         synchronized (lock) {
             if (!networkPacketList.contains(networkPacket)) {
@@ -131,6 +148,13 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
 
             isRunning = true;
 
+            // For folder transfers: pre-create the entire directory tree
+            // (including empty dirs) from the update packet, once.
+            if (!directoriesEnsured) {
+                ensureDirectoryPathsFromPacket();
+                directoriesEnsured = true;
+            }
+
             while (!done && !isCancelled()) {
                 synchronized (lock) {
                     currentNetworkPacket = networkPacketList.get(0);
@@ -140,7 +164,7 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
 
                 setProgress((int)prevProgressPercentage);
 
-                fileDocument = getDocumentFileFor(currentFileName, currentNetworkPacket.getBoolean("open", false));
+                fileDocument = getDocumentFileFor(currentNetworkPacket);
 
                 if (currentNetworkPacket.hasPayload()) {
                     outputStream = new BufferedOutputStream(getDevice().getContext().getContentResolver().openOutputStream(fileDocument.getUri()));
@@ -259,7 +283,11 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
         }
     }
 
-    private DocumentFile getDocumentFileFor(final String filename, final boolean open) throws RuntimeException {
+    private DocumentFile getDocumentFileFor(final NetworkPacket np) throws RuntimeException {
+        final String filename = np.getString("filename", Long.toString(System.currentTimeMillis()));
+        final boolean open = np.getBoolean("open", false);
+        final String relativePath = np.getStringOrNull("relativePath");
+
         final DocumentFile destinationFolderDocument;
 
         // If the file should be opened immediately store it in the standard location to avoid the FileProvider trouble (See ReceiveNotification::setURI)
@@ -270,15 +298,89 @@ public class CompositeReceiveFileJob extends BackgroundJob<Device, Void> {
             destinationFolderDocument = ShareSettingsFragment.getDestinationDirectory(getDevice().getContext());
         }
 
-        String filenameToUse = FilesHelper.findValidNonExistingFileName(destinationFolderDocument, filename);
+        // Create intermediate subdirectories if this is a folder transfer
+        DocumentFile targetFolder = destinationFolderDocument;
+        if (relativePath != null && !relativePath.isEmpty()) {
+            String[] segments = relativePath.split("/");
+            // Walk all segments except the last (which is the filename)
+            for (int i = 0; i < segments.length - 1; i++) {
+                if (segments[i].isEmpty()) continue;
+                DocumentFile child = targetFolder.findFile(segments[i]);
+                if (child == null || !child.isDirectory()) {
+                    child = targetFolder.createDirectory(segments[i]);
+                }
+                if (child == null) {
+                    throw new RuntimeException("Cannot create directory: " + segments[i]);
+                }
+                targetFolder = child;
+            }
+            // Use the last segment as the filename
+            if (segments.length > 0 && !segments[segments.length - 1].isEmpty()) {
+                String lastSegment = segments[segments.length - 1];
+                String filenameToUse = FilesHelper.findValidNonExistingFileName(targetFolder, lastSegment);
+                DocumentFile fileDocument = targetFolder.createFile("*/*", filenameToUse);
+                if (fileDocument == null) {
+                    throw new RuntimeException(getDevice().getContext().getString(R.string.cannot_create_file, filenameToUse));
+                }
+                return fileDocument;
+            }
+        }
 
-        DocumentFile fileDocument = destinationFolderDocument.createFile("*/*", filenameToUse);
+        String filenameToUse = FilesHelper.findValidNonExistingFileName(targetFolder, filename);
+
+        DocumentFile fileDocument = targetFolder.createFile("*/*", filenameToUse);
 
         if (fileDocument == null) {
             throw new RuntimeException(getDevice().getContext().getString(R.string.cannot_create_file, filenameToUse));
         }
 
         return fileDocument;
+    }
+
+    /**
+     * Create all directories from the {@code directoryPaths} update packet.
+     * Called once at the start of {@link #run()} for folder transfers.
+     */
+    private void ensureDirectoryPathsFromPacket() {
+        if (directoryPaths == null || directoryPaths.length() == 0) return;
+
+        // Determine the root destination folder (same logic as getDocumentFileFor)
+        final DocumentFile root;
+        if (ShareSettingsFragment.isCustomDestinationEnabled(getDevice().getContext())) {
+            root = ShareSettingsFragment.getDestinationDirectory(getDevice().getContext());
+        } else {
+            final String defaultPath = ShareSettingsFragment.getDefaultDestinationDirectory().getAbsolutePath();
+            root = DocumentFile.fromFile(new File(defaultPath));
+        }
+
+        for (int i = 0; i < directoryPaths.length(); i++) {
+            try {
+                ensureDirectoryPathExists(root, directoryPaths.getString(i));
+            } catch (org.json.JSONException e) {
+                Log.e("SharePlugin", "Invalid directory path entry", e);
+            }
+        }
+    }
+
+    /**
+     * Ensure a directory path exists under the given root, creating any
+     * missing intermediate directories.
+     */
+    private static void ensureDirectoryPathExists(DocumentFile root, String dirPath) {
+        String[] segments = dirPath.split("/");
+        DocumentFile current = root;
+        for (String segment : segments) {
+            if (segment.isEmpty()) continue;
+            DocumentFile child = current.findFile(segment);
+            if (child == null || !child.isDirectory()) {
+                child = current.createDirectory(segment);
+            }
+            if (child == null) {
+                Log.e("SharePlugin", "Cannot create directory: " + segment + " in path: " + dirPath);
+                return;
+            }
+            current = child;
+        }
     }
 
     private long receiveFile(InputStream input, OutputStream output) throws IOException {

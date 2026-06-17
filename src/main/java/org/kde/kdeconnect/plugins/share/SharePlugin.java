@@ -8,6 +8,8 @@ package org.kde.kdeconnect.plugins.share;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
@@ -23,6 +25,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.WorkerThread;
+import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.IntentCompat;
 import androidx.core.content.LocusIdCompat;
@@ -37,7 +40,10 @@ import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
 import org.kde.kdeconnect.helpers.FilesHelper;
 import org.kde.kdeconnect.helpers.IntentHelper;
+import org.kde.kdeconnect.helpers.NotificationHelper;
+import org.kde.kdeconnect.helpers.ThreadHelper;
 import org.kde.kdeconnect.NetworkPacket;
+import org.kde.kdeconnect.DeviceType;
 import org.kde.kdeconnect.plugins.Plugin;
 import org.kde.kdeconnect.plugins.PluginFactory;
 import org.kde.kdeconnect.ui.MainActivity;
@@ -46,6 +52,7 @@ import org.kde.kdeconnect.async.BackgroundJob;
 import org.kde.kdeconnect.async.BackgroundJobHandler;
 import org.kde.kdeconnect_tp.R;
 
+import java.io.File;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -54,6 +61,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 
+import kotlin.Pair;
 import kotlin.Unit;
 
 /**
@@ -66,10 +74,13 @@ import kotlin.Unit;
 @PluginFactory.LoadablePlugin
 public class SharePlugin extends Plugin {
     final static String ACTION_CANCEL_SHARE = "org.kde.kdeconnect.plugins.share.CancelShare";
+    final static String ACTION_RESUME_SHARE = "org.kde.kdeconnect.plugins.share.ResumeShare";
+    final static String ACTION_DISMISS_SHARE = "org.kde.kdeconnect.plugins.share.DismissShare";
     final static String CANCEL_SHARE_DEVICE_ID_EXTRA = "deviceId";
     final static String CANCEL_SHARE_BACKGROUND_JOB_ID_EXTRA = "backgroundJobId";
+    final static String RESUME_MANIFEST_FILE_PATH_EXTRA = "manifestFilePath";
 
-    private final static String PACKET_TYPE_SHARE_REQUEST = "kdeconnect.share.request";
+    final static String PACKET_TYPE_SHARE_REQUEST = "kdeconnect.share.request";
     final static String PACKET_TYPE_SHARE_REQUEST_UPDATE = "kdeconnect.share.request.update";
 
     final static String KEY_NUMBER_OF_FILES = "numberOfFiles";
@@ -81,6 +92,11 @@ public class SharePlugin extends Plugin {
     private CompositeReceiveFileJob receiveFileJob;
     private CompositeUploadFileJob uploadFileJob;
     private final Callback receiveFileJobCallback;
+
+    // Holder for directory paths from an update packet that arrives
+    // before the first file packet (and thus before receiveFileJob exists).
+    @Nullable
+    private org.json.JSONArray pendingDirectoryPaths;
 
     public static final String KEY_UNREACHABLE_URL_LIST = "key_unreachable_url_list";
     private SharedPreferences mSharedPrefs;
@@ -97,7 +113,142 @@ public class SharePlugin extends Plugin {
         createOrUpdateDynamicShortcut(null);
         // Deliver URLs previously shared to this device now that it's connected
         deliverPreviouslySentIntents();
+        checkForPendingFolderResume();
         return true;
+    }
+
+    private void checkForPendingFolderResume() {
+        List<File> pending = ShareFolderManifestStore.INSTANCE.getPendingManifests(
+                context, device.getDeviceId());
+        for (File manifestFile : pending) {
+            Pair<FolderTransferManifest, Integer> result =
+                    ShareFolderManifestStore.INSTANCE.load(context, manifestFile);
+            if (result == null) {
+                manifestFile.delete();
+                continue;
+            }
+
+            FolderTransferManifest manifest = result.getFirst();
+            int resumeIndex = result.getSecond();
+            int remainingCount = manifest.getTotalFiles() - resumeIndex;
+
+            if (remainingCount <= 0) {
+                // Transfer was already complete; just clean up
+                manifestFile.delete();
+                continue;
+            }
+
+            handler.post(() -> showResumeNotification(manifestFile, manifest, resumeIndex, remainingCount));
+        }
+    }
+
+    private void showResumeNotification(File manifestFile, FolderTransferManifest manifest,
+                                         int resumeIndex, int remainingCount) {
+        Context ctx = context;
+        int notificationId = manifestFile.hashCode();
+
+        Intent resumeIntent = new Intent(ctx, ShareBroadcastReceiver.class);
+        resumeIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+        resumeIntent.setAction(ACTION_RESUME_SHARE);
+        resumeIntent.putExtra(CANCEL_SHARE_DEVICE_ID_EXTRA, device.getDeviceId());
+        resumeIntent.putExtra(RESUME_MANIFEST_FILE_PATH_EXTRA, manifestFile.getAbsolutePath());
+        PendingIntent resumePendingIntent = PendingIntent.getBroadcast(
+                ctx, 0, resumeIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        Intent dismissIntent = new Intent(ctx, ShareBroadcastReceiver.class);
+        dismissIntent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+        dismissIntent.setAction(ACTION_DISMISS_SHARE);
+        dismissIntent.putExtra(CANCEL_SHARE_DEVICE_ID_EXTRA, device.getDeviceId());
+        dismissIntent.putExtra(RESUME_MANIFEST_FILE_PATH_EXTRA, manifestFile.getAbsolutePath());
+        PendingIntent dismissPendingIntent = PendingIntent.getBroadcast(
+                ctx, 1, dismissIntent, PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+
+        String title = ctx.getString(
+                R.string.resume_folder_transfer_title, device.getName());
+        String message = ctx.getString(
+                R.string.resume_folder_transfer_message,
+                manifest.getRootDisplayName(), resumeIndex, manifest.getTotalFiles());
+
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(
+                ctx, NotificationHelper.Channels.FILETRANSFER_UPLOAD)
+                .setSmallIcon(android.R.drawable.stat_sys_upload)
+                .setContentTitle(title)
+                .setContentText(message)
+                .setStyle(new NotificationCompat.BigTextStyle().bigText(message))
+                .setAutoCancel(true)
+                .setOngoing(false)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .addAction(R.drawable.ic_reject_pairing_24dp,
+                        ctx.getString(R.string.resume), resumePendingIntent)
+                .addAction(R.drawable.ic_reject_pairing_24dp,
+                        ctx.getString(R.string.dismiss_transfer), dismissPendingIntent);
+
+        NotificationManager nm = ContextCompat.getSystemService(ctx, NotificationManager.class);
+        nm.notify(notificationId, builder.build());
+    }
+
+    void resumeFolderTransfer(String manifestFilePath) {
+        if (uploadFileJob != null) {
+            Toast.makeText(context, R.string.transfer_in_progress, Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        File manifestFile = new File(manifestFilePath);
+        if (!manifestFile.exists()) {
+            return;
+        }
+
+        // Dismiss the resume notification
+        NotificationManager nm = ContextCompat.getSystemService(context, NotificationManager.class);
+        nm.cancel(manifestFile.hashCode());
+
+        // Load saved state
+        Pair<FolderTransferManifest, Integer> result =
+                ShareFolderManifestStore.INSTANCE.load(context, manifestFile);
+        if (result == null) {
+            manifestFile.delete();
+            return;
+        }
+
+        FolderTransferManifest manifest = result.getFirst();
+        int resumeIndex = result.getSecond();
+
+        List<ShareFolderManifestStore.PendingFileEntry> remaining =
+                ShareFolderManifestStore.INSTANCE.loadRemainingEntries(manifestFile);
+
+        if (remaining.isEmpty()) {
+            manifestFile.delete();
+            return;
+        }
+
+        // Validate tree URI is still accessible
+        Uri treeUri = Uri.parse(manifest.getTreeUri());
+        try {
+            context.getContentResolver().takePersistableUriPermission(
+                    treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        } catch (SecurityException e) {
+            Log.w("SharePlugin", "Cannot resume: tree URI permission lost for " + manifest.getRootDisplayName());
+            Toast.makeText(context, R.string.send_folder_empty, Toast.LENGTH_SHORT).show();
+            manifestFile.delete();
+            return;
+        }
+
+        CompositeUploadFolderJob job = new CompositeUploadFolderJob(
+                getDevice(), receiveFileJobCallback, manifest, treeUri, resumeIndex, remaining);
+        uploadFileJob = job;
+        backgroundJobHandler.runJob(job);
+
+        // Delete manifest file now — saveResumeState() will recreate it as the transfer progresses
+        manifestFile.delete();
+    }
+
+    void dismissFolderTransfer(String manifestFilePath) {
+        File manifestFile = new File(manifestFilePath);
+        manifestFile.delete();
+
+        // Dismiss the resume notification
+        NotificationManager nm = ContextCompat.getSystemService(context, NotificationManager.class);
+        nm.cancel(manifestFile.hashCode());
     }
 
     @Override
@@ -187,9 +338,22 @@ public class SharePlugin extends Plugin {
     @Override
     public @NotNull List<@NotNull PluginUiButton> getUiButtons() {
         return List.of(new PluginUiButton(context.getString(R.string.send_files), R.drawable.share_plugin_action_24dp, parentActivity -> {
-            Intent intent = new Intent(parentActivity, SendFileActivity.class);
-            intent.putExtra("deviceId", getDevice().getDeviceId());
-            parentActivity.startActivity(intent);
+            boolean isAndroidPeer = device.getDeviceType() == DeviceType.PHONE
+                    || device.getDeviceType() == DeviceType.TABLET
+                    || device.getDeviceType() == DeviceType.TV;
+            if (isAndroidPeer && ShareSettingsFragment.isSendFolderEnabled(context)) {
+                if (uploadFileJob != null) {
+                    Toast.makeText(context, R.string.transfer_in_progress, Toast.LENGTH_SHORT).show();
+                    return Unit.INSTANCE;
+                }
+                Intent intent = new Intent(parentActivity, SendFolderChooserActivity.class);
+                intent.putExtra("deviceId", getDevice().getDeviceId());
+                parentActivity.startActivity(intent);
+            } else {
+                Intent intent = new Intent(parentActivity, SendFileActivity.class);
+                intent.putExtra("deviceId", getDevice().getDeviceId());
+                parentActivity.startActivity(intent);
+            }
             return Unit.INSTANCE;
         }));
     }
@@ -206,8 +370,17 @@ public class SharePlugin extends Plugin {
             if (np.getType().equals(PACKET_TYPE_SHARE_REQUEST_UPDATE)) {
                 if (receiveFileJob != null && receiveFileJob.isRunning()) {
                     receiveFileJob.updateTotals(np.getInt(KEY_NUMBER_OF_FILES), np.getLong(KEY_TOTAL_PAYLOAD_SIZE));
+                    // Forward directory paths for folder transfers (preserves empty dirs)
+                    org.json.JSONArray dirPaths = np.getJSONArray("directoryPaths");
+                    if (dirPaths != null) {
+                        receiveFileJob.setDirectoryPaths(dirPaths);
+                    }
                 } else {
-                    Log.d("SharePlugin", "Received update packet but CompositeUploadJob is null or not running");
+                    // receiveFileJob doesn't exist yet — store directory paths for when it's created
+                    org.json.JSONArray dirPaths = np.getJSONArray("directoryPaths");
+                    if (dirPaths != null) {
+                        pendingDirectoryPaths = dirPaths;
+                    }
                 }
 
                 return true;
@@ -261,6 +434,11 @@ public class SharePlugin extends Plugin {
             job = receiveFileJob;
         } else {
             job = new CompositeReceiveFileJob(getDevice(), receiveFileJobCallback);
+            // Attach any directory paths that arrived before the first file packet
+            if (pendingDirectoryPaths != null) {
+                job.setDirectoryPaths(pendingDirectoryPaths);
+                pendingDirectoryPaths = null;
+            }
         }
 
         if (!hasNumberOfFiles) {
@@ -281,6 +459,35 @@ public class SharePlugin extends Plugin {
     @Override
     public PluginSettingsFragment getSettingsFragment(Activity activity) {
         return ShareSettingsFragment.newInstance(getPluginKey(), R.xml.shareplugin_preferences);
+    }
+
+    void sendFolder(final Uri treeUri) {
+        // Persist URI permission for resume after reboot
+        context.getContentResolver().takePersistableUriPermission(
+                treeUri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+        handler.post(() -> Toast.makeText(context, R.string.sending_folder_preparing, Toast.LENGTH_SHORT).show());
+
+        // Traverse on background thread
+        ThreadHelper.execute(() -> {
+            FolderTransferManifest manifest = ShareFolderTraversalHelper.INSTANCE.traverse(context, treeUri);
+
+            handler.post(() -> {
+                if (manifest.isEmpty()) {
+                    Toast.makeText(context, R.string.send_folder_empty, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                if (manifest.getTruncated()) {
+                    Toast.makeText(context, R.string.folder_transfer_max_files, Toast.LENGTH_LONG).show();
+                }
+
+                CompositeUploadFolderJob job = new CompositeUploadFolderJob(
+                        getDevice(), receiveFileJobCallback, manifest, treeUri);
+                uploadFileJob = job;
+                backgroundJobHandler.runJob(job);
+            });
+        });
     }
 
     void sendUriList(final ArrayList<Uri> uriList) {

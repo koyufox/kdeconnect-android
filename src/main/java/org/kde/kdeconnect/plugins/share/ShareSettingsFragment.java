@@ -18,16 +18,19 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.preference.Preference;
+import androidx.preference.PreferenceCategory;
 import androidx.preference.PreferenceManager;
 import androidx.preference.PreferenceScreen;
 import androidx.preference.SwitchPreference;
 
+import org.kde.kdeconnect.DeviceType;
 import org.kde.kdeconnect.ui.PluginSettingsFragment;
 
 import java.io.File;
 
 public class ShareSettingsFragment extends PluginSettingsFragment {
 
+    private final static String PREFERENCE_SEND_FOLDER = "share_send_folder_enabled";
     private final static String PREFERENCE_CUSTOMIZE_DESTINATION = "share_destination_custom";
     private final static String PREFERENCE_DESTINATION = "share_destination_folder_uri";
 
@@ -66,6 +69,17 @@ public class ShareSettingsFragment extends PluginSettingsFragment {
                 .getBoolean(PREFERENCE_CUSTOMIZE_DESTINATION, false);
 
         updateFilePickerStatus(customized);
+
+        // Hide "Sending" category for desktop/laptop devices (only meaningful for Android peers)
+        if (getDevice() != null) {
+            DeviceType deviceType = getDevice().getDeviceType();
+            if (deviceType == DeviceType.DESKTOP || deviceType == DeviceType.LAPTOP) {
+                PreferenceCategory sendingCategory = findPreference("category_sending");
+                if (sendingCategory != null) {
+                    sendingCategory.setVisible(false);
+                }
+            }
+        }
     }
 
     private void updateFilePickerStatus(boolean enabled) {
@@ -83,6 +97,11 @@ public class ShareSettingsFragment extends PluginSettingsFragment {
 
     public static File getDefaultDestinationDirectory() {
         return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+    }
+
+    public static boolean isSendFolderEnabled(Context context) {
+        return PreferenceManager.getDefaultSharedPreferences(context)
+                .getBoolean(PREFERENCE_SEND_FOLDER, false);
     }
 
     public static boolean isCustomDestinationEnabled(Context context) {

@@ -20,6 +20,12 @@ public class ShareBroadcastReceiver extends BroadcastReceiver {
             case SharePlugin.ACTION_CANCEL_SHARE:
                 cancelShare(context, intent);
                 break;
+            case SharePlugin.ACTION_RESUME_SHARE:
+                resumeShare(context, intent);
+                break;
+            case SharePlugin.ACTION_DISMISS_SHARE:
+                dismissShare(context, intent);
+                break;
             default:
                 Log.d("ShareBroadcastReceiver", "Unhandled Action received: " + intent.getAction());
         }
@@ -40,5 +46,39 @@ public class ShareBroadcastReceiver extends BroadcastReceiver {
             return;
         }
         plugin.cancelJob(jobId);
+    }
+
+    private void resumeShare(Context context, Intent intent) {
+        if (!intent.hasExtra(SharePlugin.CANCEL_SHARE_DEVICE_ID_EXTRA) ||
+            !intent.hasExtra(SharePlugin.RESUME_MANIFEST_FILE_PATH_EXTRA)) {
+            Log.e("ShareBroadcastReceiver", "resumeShare() - not all expected extras are present");
+            return;
+        }
+
+        String deviceId = intent.getStringExtra(SharePlugin.CANCEL_SHARE_DEVICE_ID_EXTRA);
+        String manifestFilePath = intent.getStringExtra(SharePlugin.RESUME_MANIFEST_FILE_PATH_EXTRA);
+
+        SharePlugin plugin = KdeConnect.getInstance().getDevicePlugin(deviceId, SharePlugin.class);
+        if (plugin == null) {
+            return;
+        }
+        plugin.resumeFolderTransfer(manifestFilePath);
+    }
+
+    private void dismissShare(Context context, Intent intent) {
+        if (!intent.hasExtra(SharePlugin.CANCEL_SHARE_DEVICE_ID_EXTRA) ||
+            !intent.hasExtra(SharePlugin.RESUME_MANIFEST_FILE_PATH_EXTRA)) {
+            Log.e("ShareBroadcastReceiver", "dismissShare() - not all expected extras are present");
+            return;
+        }
+
+        String deviceId = intent.getStringExtra(SharePlugin.CANCEL_SHARE_DEVICE_ID_EXTRA);
+        String manifestFilePath = intent.getStringExtra(SharePlugin.RESUME_MANIFEST_FILE_PATH_EXTRA);
+
+        SharePlugin plugin = KdeConnect.getInstance().getDevicePlugin(deviceId, SharePlugin.class);
+        if (plugin == null) {
+            return;
+        }
+        plugin.dismissFolderTransfer(manifestFilePath);
     }
 }

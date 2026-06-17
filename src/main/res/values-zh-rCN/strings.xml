@@ -461,4 +461,40 @@
   <string name="pref_presenter_enable_volume_keys_summary">待机控制在安卓 13 到 15 版之间不支持</string>
   <string name="presenter_volume_keys_foreground_tip">您可以保持屏幕亮起以用音量键作为上一张/下一张幻灯片按钮</string>
   <string name="presenter_volume_keys_tip">您可以保持屏幕亮起或锁定设备以用音量键作为上一张/下一张幻灯片按钮</string>
+
+  <!-- Share plugin preference groups -->
+  <string name="share_sending_category">发送</string>
+  <string name="share_receiving_category">接收</string>
+
+  <!-- Send folder toggle -->
+  <string name="share_send_folder_title">发送文件夹</string>
+  <string name="share_send_folder_summary">在向其他 Android 设备发送前显示文件/文件夹选择器</string>
+
+  <!-- Send folder chooser -->
+  <string name="send_file_option">发送文件</string>
+  <string name="send_file_option_desc">选择一个或多个文件发送</string>
+  <string name="send_folder_option">发送文件夹</string>
+  <string name="send_folder_option_desc">选择一个文件夹发送其全部内容，保留文件夹结构</string>
+
+  <!-- Send folder transfer status -->
+  <string name="send_folder_empty">所选文件夹中未找到文件</string>
+  <string name="transfer_in_progress">已有传输正在进行中</string>
+  <string name="sending_folder_progress">%1$s/%2$s（%3$d / %4$d）</string>
+  <string name="sending_folder_preparing">正在准备文件夹传输…</string>
+  <string name="sent_folder_partial">已发送文件夹 \"%1$s\"：%2$d/%3$d 个文件到 %4$s</string>
+
+  <!-- Send folder completion plurals -->
+  <plurals name="sent_folder_title">
+    <item quantity="one">已发送文件夹 \"%1$s\"（%2$d 个文件）到 %3$s</item>
+    <item quantity="other">已发送文件夹 \"%1$s\"（%2$d 个文件）到 %3$s</item>
+  </plurals>
+
+  <!-- Send folder resume -->
+  <string name="resume_folder_transfer_title">恢复文件夹传输到 %1$s？</string>
+  <string name="resume_folder_transfer_message">文件夹 \"%1$s\"：已发送 %2$d / %3$d 个文件</string>
+  <string name="resume">恢复</string>
+  <string name="dismiss_transfer">忽略</string>
+
+  <!-- Send folder warnings -->
+  <string name="folder_transfer_max_files">文件夹中的文件超过 5000 个。仅有前 5000 个会被发送。</string>
 </resources>

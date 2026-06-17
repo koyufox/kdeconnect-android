@@ -166,6 +166,16 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
                 android:name="android.support.PARENT_ACTIVITY"
                 android:value="org.kde.kdeconnect.ui.MainActivity" />
         </activity>
+        <activity
+            android:name="org.kde.kdeconnect.plugins.share.SendFolderChooserActivity"
+            android:configChanges="orientation|screenSize"
+            android:exported="false"
+            android:parentActivityName="org.kde.kdeconnect.ui.MainActivity"
+            android:theme="@style/KdeConnectTheme">
+            <meta-data
+                android:name="android.support.PARENT_ACTIVITY"
+                android:value="org.kde.kdeconnect.ui.MainActivity" />
+        </activity>
 
         <receiver android:name="org.kde.kdeconnect.KdeConnectBroadcastReceiver"
             android:exported="true">
@@ -359,6 +369,8 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
             android:exported="true">
             <intent-filter>
                 <action android:name="org.kde.kdeconnect.plugins.share.CancelShare" />
+                <action android:name="org.kde.kdeconnect.plugins.share.ResumeShare" />
+                <action android:name="org.kde.kdeconnect.plugins.share.DismissShare" />
             </intent-filter>
         </receiver>
 
