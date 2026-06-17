@@ -18,7 +18,7 @@ SPDX-License-Identifier: GPL-2.0-only OR GPL-3.0-only OR LicenseRef-KDE-Accepted
 
         <SwitchPreference
             android:id="@+id/share_send_folder_enabled"
-            android:defaultValue="false"
+            android:defaultValue="true"
             android:key="share_send_folder_enabled"
             android:summary="@string/share_send_folder_summary"
             android:title="@string/share_send_folder_title" />
