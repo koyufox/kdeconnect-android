@@ -74,8 +74,7 @@ class SendFolderChooserActivity : AppCompatActivity() {
     private fun launchSendFile() {
         val intent = Intent(this, SendFileActivity::class.java)
         intent.putExtra("deviceId", deviceId)
-        startActivity(intent)
-        finish()
+        startActivityForResult(intent, REQUEST_FILE_PICKER)
     }
 
     private fun launchSendFolder() {
@@ -86,21 +85,30 @@ class SendFolderChooserActivity : AppCompatActivity() {
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_FOLDER_PICKER
-            && resultCode == Activity.RESULT_OK
-            && data?.data != null
-        ) {
-            val treeUri = data.data!!
-            ThreadHelper.execute {
-                val plugin = KdeConnect.getInstance()
-                    .getDevicePlugin(deviceId, SharePlugin::class.java) ?: return@execute
-                plugin.sendFolder(treeUri)
+        when (requestCode) {
+            REQUEST_FILE_PICKER -> {
+                if (resultCode == Activity.RESULT_OK) {
+                    finish()
+                }
             }
-            finish()
+            REQUEST_FOLDER_PICKER -> {
+                if (resultCode == Activity.RESULT_OK
+                    && data?.data != null
+                ) {
+                    val treeUri = data.data!!
+                    ThreadHelper.execute {
+                        val plugin = KdeConnect.getInstance()
+                            .getDevicePlugin(deviceId, SharePlugin::class.java) ?: return@execute
+                        plugin.sendFolder(treeUri)
+                    }
+                    finish()
+                }
+            }
         }
     }
 
     companion object {
+        private const val REQUEST_FILE_PICKER = 1000
         private const val REQUEST_FOLDER_PICKER = 1001
     }
 }

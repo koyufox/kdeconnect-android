@@ -69,6 +69,7 @@ public class SendFileActivity extends AppCompatActivity {
                     if (uris.isEmpty()) {
                         Log.w("SendFileActivity", "No files to send?");
                     } else {
+                        setResult(RESULT_OK);
                         ThreadHelper.execute(() -> {
                             SharePlugin plugin = KdeConnect.getInstance().getDevicePlugin(mDeviceId, SharePlugin.class);
                             if (plugin == null) {
